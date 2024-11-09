@@ -6,7 +6,6 @@ import os
 from dotenv import load_dotenv
 
 #TODO
-#Add the ability to view the queue
 #Add the ability to delete songs from que
 #Limit the amount of songs you can que up with a playlist (yt-music test wanted to download like 2000 songs, should not be more than 20.)
 #Get the bot to instantly download an mp3 (if possible.)
@@ -15,7 +14,8 @@ from dotenv import load_dotenv
 #Prevent the bot from shitting itself when you try to queue up a song as it's already processing a song.
 #Add the ability to check what song you are listening now.
 #Expand the queue command to also show currently playing song.
-#Make the bot hang around if the queue is cleared (instead of instantly quitting)
+#Make the bot leave after idling in a channel for a few minutes.
+#Move the download logic from play to play_next
 
 
 load_dotenv()
@@ -49,7 +49,7 @@ os.makedirs("downloads", exist_ok=True)
 # Functions ------------------------------------------------------------------------------------
 
 #Look for the file
-def SearchForFile(title):
+def search_for_file(title):
     file_path = os.path.join("downloads", title + '.mp3')
     if os.path.exists(file_path):
         return file_path
@@ -125,12 +125,12 @@ async def play(ctx, url):
         title = info.get("title", None)
 
     # Check if the file already exists
-    file_path = SearchForFile(title)
+    file_path = search_for_file(title)
 
     # If the file doesn't exist download it and search for it again.
     if file_path == None:
         ydl.download([url])
-        file_path = SearchForFile(title)
+        file_path = search_for_file(title)
 
     # Add the song to the queue
     queue.append({
