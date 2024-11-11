@@ -1,9 +1,9 @@
-import asyncio
 import discord
 from discord.ext import commands
-import yt_dlp as youtube_dl
-import os
 from dotenv import load_dotenv
+import yt_dlp as youtube_dl
+import asyncio
+import os
 
 #TODO
 #Add the ability to delete songs from que
@@ -28,6 +28,7 @@ intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
 
 queues = {}
+youtube_dl_instances = {}
 
 # Set up YouTube download options for audio
 youtube_dl_opts = {
@@ -42,7 +43,7 @@ youtube_dl_opts = {
     }],
 }
 
-# Ensure the downloads directory exists
+# Ensure the downloads directory exists and is located in the correct folder.
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 os.makedirs("downloads", exist_ok=True)
 
@@ -63,6 +64,12 @@ def get_queue(guild_id):
         queues[guild_id] = []
     return queues[guild_id]
 
+async def get_youtube_dl_instance(guild_id):
+    # If no instance exists for this guild, create a new one.
+    if guild_id not in youtube_dl_instances:
+        youtube_dl_instances[guild_id] = youtube_dl.YoutubeDL(youtube_dl_opts)
+    return youtube_dl_instances[guild_id]
+
 async def play_next(ctx):
     #Play the next song in the queue.
     voice_client = ctx.voice_client
@@ -71,8 +78,17 @@ async def play_next(ctx):
 
     if len(queue) > 0:
         next_song = queue.pop(0)
-        file_path = next_song['file_path']
+        url = next_song['url']
         title = next_song['title']
+
+        # Check if the file already exists
+        file_path = search_for_file(title)
+
+        # If the file doesn't exist download it and search for it again.
+        if file_path is None:
+            ydl = get_youtube_dl_instance(guild_id)
+            ydl.download([url])
+            file_path = search_for_file(title)
 
         audio_source = discord.FFmpegPCMAudio(file_path)
 
@@ -118,30 +134,22 @@ async def play(ctx, url):
             await ctx.send("You need to be in a voice channel first.")
             return
 
-    title = None
     # Grab the title to check if we already have the file downloaded
-    with youtube_dl.YoutubeDL(youtube_dl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        title = info.get("title", None)
+    ydl = get_youtube_dl_instance(guild_id)
 
-    # Check if the file already exists
-    file_path = search_for_file(title)
-
-    # If the file doesn't exist download it and search for it again.
-    if file_path == None:
-        ydl.download([url])
-        file_path = search_for_file(title)
+    info = ydl.extract_info(url, download=False)
+    title = info.get("title", None)
 
     # Add the song to the queue
     queue.append({
         'title': title,
-        'file_path': file_path
+        'url': url
         })
 
     if voice_client.is_playing():
         await ctx.send(f"Added to queue: {title}")
         
-    if not voice_client.is_playing():
+    else:
         await play_next(ctx)
 
 # Skip the currently playing song
