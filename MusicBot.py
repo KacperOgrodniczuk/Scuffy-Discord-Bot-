@@ -11,11 +11,10 @@ import os
 #Get the bot to instantly download an mp3 (if possible.)
 #Make sure you can only use music bot commands if you're connected to the channel the bot is in.
 #Make the bot cleanup the downloads automatically at some point (idk like when the queue ends or something).
-#Prevent the bot from shitting itself when you try to queue up a song as it's already processing a song.
-#Add the ability to check what song you are listening now.
+#Prevent the bot from shitting itself when you try to queue up a song as it's already processing a song.  --- This kind of works, It just can't deal with two play commands posted simultanously
+#Add the ability to check what song you are listening to now.
 #Expand the queue command to also show currently playing song.
 #Make the bot leave after idling in a channel for a few minutes.
-#Move the download logic from play to play_next
 
 
 load_dotenv()
@@ -57,14 +56,13 @@ def search_for_file(title):
     else:
         return None
 
-
 def get_queue(guild_id):
     # Return the queue for the specific server, or create a new one if it doesn't exist
     if guild_id not in queues:
         queues[guild_id] = []
     return queues[guild_id]
 
-async def get_youtube_dl_instance(guild_id):
+def get_youtube_dl_instance(guild_id):
     # If no instance exists for this guild, create a new one.
     if guild_id not in youtube_dl_instances:
         youtube_dl_instances[guild_id] = youtube_dl.YoutubeDL(youtube_dl_opts)
@@ -87,13 +85,15 @@ async def play_next(ctx):
         # If the file doesn't exist download it and search for it again.
         if file_path is None:
             ydl = get_youtube_dl_instance(guild_id)
-            ydl.download([url])
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, ydl.download, url)
             file_path = search_for_file(title)
 
         audio_source = discord.FFmpegPCMAudio(file_path)
 
         await ctx.send(f"Now playing: {title}")
-        voice_client.play(audio_source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop))
+        if not voice_client.is_playing():
+            voice_client.play(audio_source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop))
 
 # Commands ------------------------------------------------------------------------------------- 
 
@@ -101,7 +101,7 @@ async def play_next(ctx):
 @bot.command()
 async def join(ctx):
     if ctx.author.voice:
-        channel = ctx.author.voice.channel
+        channel = await ctx.author.voice.channel
         await channel.connect()
         await ctx.send(f"Joined {channel}")
     else:
@@ -136,8 +136,8 @@ async def play(ctx, url):
 
     # Grab the title to check if we already have the file downloaded
     ydl = get_youtube_dl_instance(guild_id)
-
-    info = ydl.extract_info(url, download=False)
+    loop = asyncio.get_running_loop()
+    info = await loop.run_in_executor(None, ydl.extract_info, url, False)
     title = info.get("title", None)
 
     # Add the song to the queue
@@ -221,7 +221,6 @@ async def help(ctx):
         "queue": "Shows the current song queue.",
         "leave": "Makes the bot leave the voice channel.",
         "stop": "Clears the queue and makes the bot leave."
-        
     }
 
     embed = discord.Embed(title="ℹ️ Help - List of Commands ℹ️", color=discord.Color.blue())
