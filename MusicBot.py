@@ -7,11 +7,11 @@ import os
 
 #TODO
 #Add the ability to delete songs from que
+#Separate the download and play logic
 #Limit the amount of songs you can que up with a playlist (yt-music test wanted to download like 2000 songs, should not be more than 20.)
 #Get the bot to instantly download an mp3 (if possible.)
 #Make sure you can only use music bot commands if you're connected to the channel the bot is in.
 #Make the bot cleanup the downloads automatically at some point (idk like when the queue ends or something).
-#Prevent the bot from shitting itself when you try to queue up a song as it's already processing a song.  --- This kind of works, It just can't deal with two play commands posted simultanously
 #Add the ability to check what song you are listening to now.
 #Expand the queue command to also show currently playing song.
 #Make the bot leave after idling in a channel for a few minutes.
@@ -28,6 +28,7 @@ bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
 
 queues = {}
 youtube_dl_instances = {}
+locks = {}
 
 # Set up YouTube download options for audio
 youtube_dl_opts = {
@@ -67,6 +68,11 @@ def get_youtube_dl_instance(guild_id):
     if guild_id not in youtube_dl_instances:
         youtube_dl_instances[guild_id] = youtube_dl.YoutubeDL(youtube_dl_opts)
     return youtube_dl_instances[guild_id]
+
+def get_lock(guild_id):
+    if guild_id not in locks:
+        locks[guild_id] = asyncio.Lock()
+    return locks[guild_id]
 
 async def play_next(ctx):
     #Play the next song in the queue.
@@ -123,6 +129,7 @@ async def play(ctx, url):
     guild_id = ctx.guild.id
     queue = get_queue(guild_id)
     voice_client = ctx.voice_client
+    lock = get_lock(guild_id)
 
     # Ensure bot is connected to a voice channel
     if not voice_client or not voice_client.is_connected():
@@ -134,23 +141,27 @@ async def play(ctx, url):
             await ctx.send("You need to be in a voice channel first.")
             return
 
+    async with lock:
     # Grab the title to check if we already have the file downloaded
-    ydl = get_youtube_dl_instance(guild_id)
-    loop = asyncio.get_running_loop()
-    info = await loop.run_in_executor(None, ydl.extract_info, url, False)
-    title = info.get("title", None)
+        try:
+            ydl = get_youtube_dl_instance(guild_id)
+            loop = asyncio.get_running_loop()
+            info = await loop.run_in_executor(None, ydl.extract_info, url, False)
+            title = info.get("title", None)
 
-    # Add the song to the queue
-    queue.append({
-        'title': title,
-        'url': url
-        })
+            # Add the song to the queue
+            queue.append({
+                'title': title,
+                'url': url
+                })
 
-    if voice_client.is_playing():
-        await ctx.send(f"Added to queue: {title}")
-        
-    else:
-        await play_next(ctx)
+            if not voice_client.is_playing():
+                await play_next(ctx)
+            else:
+                await ctx.send(f"Added to queue: {title}")
+
+        except Exception as e:
+            await ctx.send(f"Error downloading or adding song: {e}")
 
 # Skip the currently playing song
 @bot.command()
