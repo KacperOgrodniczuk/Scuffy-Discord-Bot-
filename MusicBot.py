@@ -161,7 +161,7 @@ async def play(ctx, url):
                 await ctx.send(f"Added to queue: {title}")
 
         except Exception as e:
-            await ctx.send(f"Error downloading or adding song: {e}")
+            print(f"Error downloading or adding song: {e}")
 
 # Skip the currently playing song
 @bot.command()
