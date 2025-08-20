@@ -8,11 +8,9 @@ import os
 
 #TODO
 #Add the ability to delete songs from que
-#Separate the download and play logic
 #Limit the amount of songs you can que up with a playlist (yt-music test wanted to download like 2000 songs, should not be more than 20.)
-#Get the bot to instantly download an mp3 or stream the audio directly.
 #Make sure you can only use music bot commands if you're connected to the channel the bot is in.
-#Make the bot cleanup the downloads automatically at some point (idk like when the queue ends or something).
+#Make the bot cleanup the downloads automatically at some point and priorotise files that aren't played often/recently. (idk like when the queue ends or something).
 #Add the ability to check what song you are listening to now.
 #Expand the queue command to also show currently playing song.
 #Make the bot leave after idling in a channel for a few minutes.
@@ -36,19 +34,14 @@ youtube_dl_opts = {
     'format': 'bestaudio/best',
     'outtmpl': 'downloads/%(id)s.%(ext)s',
     'noplaylist': True,
-    'nocache': True,
+    'nocache': False,
+    'cachedir': './yt_cache',
     'geo_bypass': True,
-    'postprocessors': [{
-        'key': 'FFmpegExtractAudio',
-        'preferredcodec': 'mp3',
-        'preferredquality': '192',
-    }],
-    'quiet': True,
+    'quiet': False,
     'ignoreerrors': True,
-    'noprogress': True,
+    'noprogress': False,
     'source_address': '0.0.0.0',  # bind to ipv4
     'force-ipv4': True,
-    'cachedir': False,
     'http_headers': {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
                   '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -66,9 +59,11 @@ os.makedirs("downloads", exist_ok=True)
 #Look for the file
 def search_for_file(video_id):
     # Return the path to a downloaded file based on YouTube video ID
-    file_path = os.path.join("downloads", f"{video_id}.mp3")
-    if os.path.exists(file_path):
-        return file_path
+    for ext in ('mp3', 'webm', 'm4a', 'opus'):
+        file_path = os.path.join("downloads", f"{video_id}.{ext}")
+        if os.path.exists(file_path):
+            return file_path
+    
     return None
 
 def get_queue(guild_id):
@@ -92,6 +87,7 @@ def get_lock(guild_id):
 async def download_audio(url, guild_id):
     ydl = get_youtube_dl_instance(guild_id)
     loop = asyncio.get_running_loop()
+    
     try:
         info = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=True))
         video_id = info.get('id')
@@ -101,6 +97,20 @@ async def download_audio(url, guild_id):
     except Exception as e:
         print(f"Download failed: {e}")
     return None, None
+
+async def obtain_audio_info(url, guild_id):
+    ydl = get_youtube_dl_instance(guild_id)
+    loop = asyncio.get_running_loop()
+    
+    try:
+        info = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=False))
+        video_id = info.get("id")
+        if video_id:
+            title = info.get("title", "Unknown")
+            return video_id, title
+    except Exception as e:
+        print(f"Download failed: {e}")
+
 
 async def play_next(ctx):
     """Play the next song in the guild queue"""
@@ -125,12 +135,21 @@ async def play_next(ctx):
             await play_next(ctx)
             return
 
-    audio_source = PCMVolumeTransformer(discord.FFmpegPCMAudio(file_path), volume=0.05)
-
     await ctx.send(f"Now playing: {title}")
 
+    audio_source = PCMVolumeTransformer(discord.FFmpegPCMAudio(file_path), volume=0.1)
+
+    def after_play(error):
+        if error:
+            print(f"Error playing {title}: {error}")
+        fut = asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop)
+        try:
+            fut.result()
+        except Exception as e:
+            print(f"Error scheduling next song: {e}")
+
     if not voice_client.is_playing():
-        voice_client.play(audio_source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop))
+        voice_client.play(audio_source, after=after_play)
 
 
 # Commands ------------------------------------------------------------------------------------- 
@@ -175,12 +194,7 @@ async def play(ctx, url):
 
     async with lock:
         try:
-            ydl = get_youtube_dl_instance(guild_id)
-            loop = asyncio.get_running_loop()
-            info = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=False))
-
-            video_id = info.get("id")
-            title = info.get("title", "Unknown")
+            video_id, title = await obtain_audio_info(url, guild_id)
 
             if video_id is None:
                 await ctx.send("Failed to get video info.")
@@ -199,7 +213,6 @@ async def play(ctx, url):
                 await ctx.send(f"Added to queue: {title}")
 
         except Exception as e:
-            print(f"Error adding song: {e}")
             await ctx.send(f"Error adding song: {e}")
 
 
