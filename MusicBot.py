@@ -34,17 +34,11 @@ youtube_dl_opts = {
     'format': 'bestaudio/best',
     'outtmpl': 'downloads/%(id)s.%(ext)s',
     'noplaylist': True,
-    'nocache': False,
-    'cachedir': './yt_cache',
-    'geo_bypass': True,
-    'quiet': False,
     'ignoreerrors': True,
-    'noprogress': False,
-    'source_address': '0.0.0.0',  # bind to ipv4
-    'force-ipv4': True,
+    'cookiesfrombrowser': ('firefox',),
     'http_headers': {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-                  '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                  '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/121.0.0.0 Firefox/121.0',
     'Accept-Language': 'en-US,en;q=0.9',
     'Referer': 'https://www.youtube.com/',
 }
@@ -215,7 +209,19 @@ async def play(ctx, url):
         except Exception as e:
             await ctx.send(f"Error adding song: {e}")
 
+# Delete a song from the queue based on its position
+@bot.command()
+async def delete(ctx, position: int):
+    guild_id = ctx.guild.id
+    queue = get_queue(guild_id)
+    lock = get_lock(guild_id)
 
+    async with lock:
+        if 1 <= position <= len(queue):
+            removed_song = queue.pop(position - 1)
+            await ctx.send(f"Removed from queue: {removed_song['title']}")
+        else:
+            await ctx.send("Invalid position. Please provide a valid song number in the queue.")
 
 # Skip the currently playing song
 @bot.command()
@@ -281,6 +287,7 @@ async def help(ctx):
     commands = {
         "help": "Lists bot commands.",
         "play [URL]": "Adds a song to the queue",
+        "delete [position]": "Deletes a song from the queue based on its position.",
         "skip": "Skips to the next song.",
         "clearQueue": "Clears the entire queue.",
         "queue": "Shows the current song queue.",
